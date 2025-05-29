@@ -4,100 +4,146 @@ from config import CAPTCHA_DIR, BASE_URL, logging
 import os
 
 def get_session_id():
-    session = requests.Session()  # Создаём сессию для сохранения куки
+    """Retrieves session ID from server cookies.
+    
+    Returns:
+        tuple: (session_id, session_object) if successful
+        
+    Raises:
+        Exception: If session_id cookie not found or network error occurs
+    """
+    session = requests.Session()  # Create session to maintain cookies
     try:
-        response = session.get(f"{BASE_URL}")  # Убран timeout
+        response = session.get(f"{BASE_URL}")  # Removed timeout
         if response.status_code == 200:
-            # Извлекаем session_id из куки
+            # Extract session_id from cookies
             session_id = session.cookies.get("session_id")
             if not session_id:
-                logging.error("Кука session_id не найдена в ответе сервера")
-                raise Exception("Кука session_id не найдена в ответе сервера")
-            logging.info(f"Получен session_id из куки: {session_id}")
+                logging.error("session_id cookie not found in server response")
+                raise Exception("session_id cookie not found in server response")
+            logging.info(f"Retrieved session_id from cookies: {session_id}")
             return session_id, session
         else:
-            logging.error(f"Ошибка получения session_id: {response.status_code}, Тело ответа: {response.text[:500]}")
-            raise Exception(f"Ошибка получения session_id: {response.status_code}, Тело ответа: {response.text[:500]}")
+            logging.error(f"Error getting session_id: {response.status_code}, Response: {response.text[:500]}")
+            raise Exception(f"Error getting session_id: {response.status_code}, Response: {response.text[:500]}")
     except requests.RequestException as e:
-        logging.error(f"Сетевая ошибка при получении session_id: {str(e)}")
-        raise Exception(f"Сетевая ошибка при получении session_id: {str(e)}")
+        logging.error(f"Network error while getting session_id: {str(e)}")
+        raise Exception(f"Network error while getting session_id: {str(e)}")
 
 def download_captcha(session_id, session):
+    """Downloads CAPTCHA image for given session ID.
+    
+    Args:
+        session_id: Current session identifier
+        session: Active requests session
+        
+    Returns:
+        str: Path to saved CAPTCHA image
+        
+    Raises:
+        Exception: If download fails or HTTP error occurs
+    """
     url = f"{BASE_URL}/captcha-image?session_id={session_id}"
     try:
-        response = session.get(url, stream=True)  # Убран timeout
-        response.raise_for_status()  # Вызывает исключение при ошибке HTTP
+        response = session.get(url, stream=True)  # Removed timeout
+        response.raise_for_status()  # Raises HTTPError for bad responses
         filename = f"{CAPTCHA_DIR}/captcha_{session_id}.png"
         with open(filename, 'wb') as f:
             for chunk in response.iter_content(1024):
-                if chunk:  # Фильтруем пустые чанки
+                if chunk:  # Filter out keep-alive chunks
                     f.write(chunk)
-        logging.info(f"Изображение капчи сохранено как: {filename}")
+        logging.info(f"CAPTCHA image saved as: {filename}")
         return filename
     except requests.RequestException as e:
-        logging.error(f"Ошибка при скачивании капчи с {url}: {str(e)}, Тело ответа: {getattr(e.response, 'text', 'Нет данных')[:500]}")
-        raise Exception(f"Ошибка при скачивании капчи: {str(e)}")
+        logging.error(f"Error downloading CAPTCHA from {url}: {str(e)}, Response: {getattr(e.response, 'text', 'No data')[:500]}")
+        raise Exception(f"Error downloading CAPTCHA: {str(e)}")
 
 def download_random_image(session_id, session):
+    """Downloads random image after successful CAPTCHA verification.
+    
+    Args:
+        session_id: Current session identifier
+        session: Active requests session
+        
+    Returns:
+        str: Path to saved random image or None if failed
+    """
     url = f"{BASE_URL}/random-image?session_id={session_id}"
     try:
-        response = session.get(url, stream=True)  # Убран timeout
-        response.raise_for_status()  # Вызывает исключение при ошибке HTTP
+        response = session.get(url, stream=True)  # Removed timeout
+        response.raise_for_status()
         filename = f"{CAPTCHA_DIR}/random_{session_id}.png"
         with open(filename, 'wb') as f:
             for chunk in response.iter_content(1024):
-                if chunk:  # Фильтруем пустые чанки
+                if chunk:  # Filter out keep-alive chunks
                     f.write(chunk)
-        logging.info(f"Случайное изображение сохранено как: {filename}")
+        logging.info(f"Random image saved as: {filename}")
         return filename
     except requests.RequestException as e:
-        logging.error(f"Ошибка при скачивании случайного изображения с {url}: {str(e)}, Тело ответа: {getattr(e.response, 'text', 'Нет данных')[:500]}")
+        logging.error(f"Error downloading random image from {url}: {str(e)}, Response: {getattr(e.response, 'text', 'No data')[:500]}")
         return None
 
 def verify_captcha(session_id, captcha_text, session):
-    url = f"{BASE_URL}/captcha"  # Указываем правильный endpoint для POST-запроса
-    payload = {'captcha': captcha_text, 'attempts': '0'}  # Добавляем attempts
-    cookies = {'session_id': session_id}  # Передаём session_id в куки
+    """Verifies CAPTCHA solution with the server.
+    
+    Args:
+        session_id: Current session identifier
+        captcha_text: Recognized CAPTCHA text
+        session: Active requests session
+        
+    Returns:
+        tuple: (success_status, random_image_path)
+        
+    Raises:
+        Exception: If verification fails or network error occurs
+    """
+    url = f"{BASE_URL}/captcha"  # Correct POST endpoint
+    payload = {'captcha': captcha_text, 'attempts': '0'}  # Added attempts
+    cookies = {'session_id': session_id}  # Pass session_id in cookies
+    
     try:
-        # Отправляем запрос, разрешаем перенаправления
-        response = session.post(url, data=payload, headers={'Content-Type': 'application/x-www-form-urlencoded'}, cookies=cookies, allow_redirects=True)  # Убран timeout
-        logging.info(f"Отправлен POST-запрос: URL={url}, Payload={payload}, Cookies={cookies}")
-        logging.info(f"Ответ сервера (сырой): {response.text[:500]}")
+        # Send request allowing redirects
+        response = session.post(url, data=payload, 
+                              headers={'Content-Type': 'application/x-www-form-urlencoded'}, 
+                              cookies=cookies, 
+                              allow_redirects=True)  # Removed timeout
+        logging.info(f"Sent POST request: URL={url}, Payload={payload}, Cookies={cookies}")
+        logging.info(f"Server response (raw): {response.text[:500]}")
         
-        # Проверяем конечный URL после перенаправлений
+        # Check final URL after redirects
         final_url = response.url
-        logging.info(f"Конечный URL после перенаправлений: {final_url}")
+        logging.info(f"Final URL after redirects: {final_url}")
         
-        # Проверяем, является ли конечный URL страницей успеха
+        # Check if final URL is success page
         if "/success" in final_url and response.status_code == 200:
-            # Скачиваем случайное изображение
+            # Download random image
             random_image_path = download_random_image(session_id, session)
             if random_image_path:
-                logging.info(f"Случайное изображение скачано: {random_image_path}")
+                logging.info(f"Random image downloaded: {random_image_path}")
             else:
-                logging.warning("Не удалось скачать случайное изображение")
+                logging.warning("Failed to download random image")
             
-            logging.info(f"Капча успешно проверена. Session ID: {session_id}, Текст: {captcha_text}")
+            logging.info(f"CAPTCHA verified successfully. Session ID: {session_id}, Text: {captcha_text}")
             return True, random_image_path
         elif response.status_code == 200:
-            if response.text.strip():  # Проверяем, не пустой ли ответ
+            if response.text.strip():  # Check for empty response
                 try:
                     data = response.json()
                     if data.get("success"):
-                        logging.info(f"Капча успешно проверена. Session ID: {session_id}, Текст: {captcha_text}")
-                        return True, None  # Нет изображения, так как не было перенаправления
+                        logging.info(f"CAPTCHA verified successfully. Session ID: {session_id}, Text: {captcha_text}")
+                        return True, None  # No image since no redirect
                     else:
-                        logging.warning(f"Неверный текст капчи. Session ID: {session_id}, Текст: {captcha_text}, Сообщение: {data.get('message')}")
+                        logging.warning(f"Wrong CAPTCHA text. Session ID: {session_id}, Text: {captcha_text}, Message: {data.get('message')}")
                         return False, None
                 except ValueError:
-                    logging.error(f"Не удалось разобрать JSON в ответе: {response.text[:500]}")
-                    raise Exception(f"Не удалось разобрать JSON в ответе: {response.text[:500]}")
+                    logging.error(f"Failed to parse JSON response: {response.text[:500]}")
+                    raise Exception(f"Failed to parse JSON response: {response.text[:500]}")
             else:
-                logging.error(f"Пустой ответ сервера при статусе 200 для session_id: {session_id}")
-                raise Exception("Пустой ответ сервера при статусе 200")
+                logging.error(f"Empty server response with status 200 for session_id: {session_id}")
+                raise Exception("Empty server response with status 200")
         else:
-            logging.error(f"Ошибка проверки капчи: {response.status_code}, Тело ответа: {response.text[:500]}")
-            raise Exception(f"Ошибка проверки капчи: {response.status_code}, Тело ответа: {response.text[:500]}")
+            logging.error(f"CAPTCHA verification error: {response.status_code}, Response: {response.text[:500]}")
+            raise Exception(f"CAPTCHA verification error: {response.status_code}, Response: {response.text[:500]}")
     except requests.RequestException as e:
-        logging.error(f"Сетевая ошибка при проверке капчи: {str(e)}, Тело ответа: {getattr(e.response, 'text', 'Нет данных')[:500]}")
-        raise Exception(f"Сетевая ошибка при проверке капчи: {str(e)}")
+        logging.error(f"Network error during CAPTCHA verification: {str(e)}, Response: {getattr(e.response, 'text', 'No data')[:500]}")
+        raise Exception(f"Network error during CAPTCHA verification: {str(e)}")
